@@ -5,7 +5,28 @@
 Upload PDF documents, and ask natural-language questions — DocuMind retrieves the most relevant passages and generates accurate, context-grounded answers.
 
 ---
+## ⚡ Quick Start (For Evaluators)
 
+1. Clone the repository:
+   git clone https://github.com/2211prachi/DocuMind.git
+
+2. Navigate to backend:
+   cd DocuMind/backend
+
+3. Create virtual environment:
+   python -m venv venv
+   venv\Scripts\activate
+
+4. Install dependencies:
+   pip install -r requirements.txt
+
+5. Run the backend:
+   uvicorn main:app
+
+6. Open API docs:
+   http://127.0.0.1:8000/docs
+
+👉 Upload a PDF → then use `/query` endpoint
 ## ✨ Features
 
 | Feature | Description |
@@ -20,7 +41,16 @@ Upload PDF documents, and ask natural-language questions — DocuMind retrieves 
 | **Streamlit UI** | Beautiful chat-style frontend with PDF upload sidebar |
 
 ---
+## 🧠 Agentic Design
 
+DocuMind implements a lightweight agentic pipeline with:
+- Query rewriting (agent)
+- Routing (tool vs retrieval)
+- Retrieval (ChromaDB)
+- Generation (FLAN-T5)
+- Evaluation (self-check + retry)
+- Memory (last 5 interactions)
+  
 ## 🏗️ Architecture
 
 ```
@@ -91,7 +121,7 @@ backend/
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.10+
 - pip
 
 ### 1. Clone the repository
@@ -138,7 +168,18 @@ streamlit run streamlit_app.py
 The UI will open at `http://localhost:8501`.
 
 ---
+## 🧪 Example Queries
 
+### Document-based query
+{
+  "question": "Summarize the document",
+  "filename": "sample.pdf"
+}
+
+### Tool-based query
+{
+  "question": "What is the current time?"
+}
 ## 📡 API Reference
 
 ### `POST /upload`
@@ -194,7 +235,11 @@ Ask a question about your uploaded documents.
 3. **Review sources** — Expand the "View Sources" section to see which pages were used.
 
 ---
+## ⚠️ Limitations
 
+- Uses lightweight local models, so reasoning may be limited
+- Evaluation is heuristic-based
+- Memory is session-based (not persistent)
 ## 📄 License
 
 This project is open-source. Feel free to use and modify it.
