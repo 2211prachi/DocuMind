@@ -5,7 +5,7 @@
 Upload PDF documents, and ask natural-language questions — DocuMind retrieves the most relevant passages and generates accurate, context-grounded answers.
 
 ---
-## ⚡ Quick Start (For Evaluators)
+## ⚡ Quick Start
 
 1. Clone the repository:
    git clone https://github.com/2211prachi/DocuMind.git
