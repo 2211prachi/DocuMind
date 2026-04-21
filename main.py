@@ -32,7 +32,7 @@ def home():
     return {"message": "DocuMind API is running"}
 
 
-# 📄 Upload API
+# Upload API
 @app.post("/upload")
 def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
@@ -53,7 +53,7 @@ def upload_pdf(file: UploadFile = File(...)):
     }
 
 
-# 🔧 TOOL NODE
+# TOOL NODE
 def tool_node(query: str):
     import datetime
 
@@ -66,14 +66,14 @@ def tool_node(query: str):
     return None  
 
 
-# 📊 EVAL NODE
+# EVAL NODE
 def eval_node(answer: str):
     if len(answer.split()) < 10:
         return 0.5
     return 0.8
 
 
-# ❓ Query API
+# Query API
 @app.post("/query")
 def ask_question(request: QueryRequest):
     query = request.question
@@ -81,7 +81,7 @@ def ask_question(request: QueryRequest):
 
     rewritten_query = rewrite_query(query)
 
-    # 🔀 ROUTER
+    # ROUTER
     tool_result = tool_node(query)
 
     if tool_result:
@@ -93,7 +93,6 @@ def ask_question(request: QueryRequest):
         docs = retrieve_docs(rewritten_query, filename)
         retrieval_time = time.time() - start
 
-        # 🔥 SAFETY CHECK (IMPORTANT FIX)
         if not docs:
             return {
                 "answer": f"No content found for document: {filename}",
@@ -108,20 +107,20 @@ def ask_question(request: QueryRequest):
 
         answer = generate_answer(query, docs, chat_history)
 
-    # 📊 EVALUATION
+    # EVALUATION
     score = eval_node(answer)
 
     if score < 0.7 and docs:
         answer = generate_answer(query, docs, chat_history)
 
-    # 🧠 MEMORY
+    # MEMORY
     chat_history.append({
         "question": query,
         "answer": answer
     })
     chat_history[:] = chat_history[-5:]
 
-    # 📚 SOURCES
+    # SOURCES
     sources = [
         {
             "page": doc.metadata.get("page"),
