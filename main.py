@@ -2,12 +2,13 @@ from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
 from pathlib import Path
 import shutil
+import time
 
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
-from transformers import pipeline
+# Services
+from services.ingestion import process_pdf
+from services.retrieval import retrieve_docs
+from services.generation import generate_answer
+from services.agent import rewrite_query
 
 app = FastAPI()
 
@@ -19,110 +20,128 @@ chroma_path = base_path / "chroma_db"
 # Create upload folder if not present
 upload_path.mkdir(exist_ok=True)
 
-# Embedding model
-embedding = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
-
-# LLM
-generator = pipeline(
-    "text2text-generation",
-    model="google/flan-t5-base",
-    max_new_tokens=200
-)
-
+# Simple in-memory chat history
+chat_history = []
 
 class QueryRequest(BaseModel):
     question: str
-
+    filename: str = None
 
 @app.get("/")
 def home():
     return {"message": "DocuMind API is running"}
 
 
+# 📄 Upload API
 @app.post("/upload")
 def upload_pdf(file: UploadFile = File(...)):
-    # Check file type
     if not file.filename.endswith(".pdf"):
-        return {"error": "Only PDF files are allowed"}
+        return {"error": "Only PDF files allowed"}
 
-    # Clear old ChromaDB
-    if chroma_path.exists():
-        shutil.rmtree(chroma_path)
-
-    # Save uploaded PDF
     file_path = upload_path / file.filename
+
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Load PDF
-    loader = PyPDFLoader(str(file_path))
-    documents = loader.load()
-
-    # Split into chunks
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=100
-    )
-    chunks = splitter.split_documents(documents)
-
-    # Store in fresh ChromaDB
-    Chroma.from_documents(
-        documents=chunks,
-        embedding=embedding,
-        persist_directory=str(chroma_path)
-    )
+    pages, chunks = process_pdf(str(file_path))
 
     return {
-        "message": "PDF uploaded and processed successfully",
+        "message": "PDF processed successfully",
         "filename": file.filename,
-        "total_pages": len(documents),
-        "total_chunks": len(chunks)
+        "pages": pages,
+        "chunks": chunks
     }
 
 
+# 🔧 TOOL NODE
+def tool_node(query: str):
+    import datetime
+
+    if "time" in query.lower():
+        return f"Current time is {datetime.datetime.now().strftime('%H:%M:%S')}"
+    
+    if "date" in query.lower():
+        return f"Today's date is {datetime.datetime.now().strftime('%Y-%m-%d')}"
+    
+    return None  
+
+
+# 📊 EVAL NODE
+def eval_node(answer: str):
+    if len(answer.split()) < 10:
+        return 0.5
+    return 0.8
+
+
+# ❓ Query API
 @app.post("/query")
 def ask_question(request: QueryRequest):
     query = request.question
+    filename = request.filename
 
-    vectorstore = Chroma(
-        persist_directory=str(chroma_path),
-        embedding_function=embedding
-    )
+    rewritten_query = rewrite_query(query)
 
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
-    docs = retriever.invoke(query)
+    # 🔀 ROUTER
+    tool_result = tool_node(query)
 
-    context = "\n\n".join([doc.page_content for doc in docs])
+    if tool_result:
+        answer = tool_result
+        docs = []
+        retrieval_time = 0
+    else:
+        start = time.time()
+        docs = retrieve_docs(rewritten_query, filename)
+        retrieval_time = time.time() - start
 
-    prompt = f"""
-You are a helpful document question-answering assistant.
+        # 🔥 SAFETY CHECK (IMPORTANT FIX)
+        if not docs:
+            return {
+                "answer": f"No content found for document: {filename}",
+                "sources": [],
+                "explanation": [],
+                "confidence": 0,
+                "metrics": {
+                    "retrieval_time": retrieval_time,
+                    "chunks_used": 0
+                }
+            }
 
-Answer the question using only the context provided below.
-If the answer is not present in the context, say:
-"I could not find the answer in the uploaded document."
+        answer = generate_answer(query, docs, chat_history)
 
-Context:
-{context}
+    # 📊 EVALUATION
+    score = eval_node(answer)
 
-Question:
-{query}
+    if score < 0.7 and docs:
+        answer = generate_answer(query, docs, chat_history)
 
-Give a clear and concise answer.
-"""
+    # 🧠 MEMORY
+    chat_history.append({
+        "question": query,
+        "answer": answer
+    })
+    chat_history[:] = chat_history[-5:]
 
-    result = generator(prompt)
+    # 📚 SOURCES
+    sources = [
+        {
+            "page": doc.metadata.get("page"),
+            "file": doc.metadata.get("filename")
+        }
+        for doc in docs
+    ]
 
-    sources = []
-    for doc in docs:
-        sources.append({
-            "page": doc.metadata.get("page", "unknown"),
-            "source": doc.metadata.get("source", "unknown"),
-            "content": doc.page_content
-        })
+    explanation = [
+        f"Retrieved from page {doc.metadata.get('page')} of {doc.metadata.get('filename')}"
+        for doc in docs
+    ]
 
     return {
-        "answer": result[0]["generated_text"],
-        "sources": sources
+        "answer": answer,
+        "sources": sources,
+        "explanation": explanation,
+        "confidence": round(score, 2),
+        "metrics": {
+            "retrieval_time": retrieval_time,
+            "chunks_used": len(docs)
+        }
     }
